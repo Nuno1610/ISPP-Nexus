@@ -1,0 +1,146 @@
+from rest_framework import serializers
+
+from apps.membership.permissions import (
+    has_screen_permission,
+)
+
+
+from apps.bedrooms.serializers import BedroomSerializer
+from apps.membership.models import Membership
+from apps.bedrooms.models import Bedroom
+from apps.staff.models import Staff
+from .models import Incidence, IncidenceUpdate
+
+
+class IncidenceUpdateSerializer(serializers.ModelSerializer):
+    author_name = serializers.ReadOnlyField(source="author.get_full_name")
+
+    class Meta:
+        model = IncidenceUpdate
+        fields = ["id", "text", "author_name", "created_at"]
+
+
+class IncidenceSerializer(serializers.ModelSerializer):
+    updates = IncidenceUpdateSerializer(many=True, read_only=True)
+    student_name = serializers.SerializerMethodField()
+    room_number_detail = BedroomSerializer(source='room_number', read_only=True)
+    is_mine = serializers.SerializerMethodField()
+    assigned_staff_name = serializers.CharField(source='assigned_staff.user.get_full_name', read_only=True, default=None)
+    assigned_staff_job = serializers.CharField(source='assigned_staff.job_title', read_only=True, default=None)
+    room_number = serializers.PrimaryKeyRelatedField(
+        queryset=Bedroom.objects.all(), 
+        required=False, 
+        allow_null=True)
+
+    class Meta:
+        model = Incidence
+        fields = [
+            'id', 'title', 'description', 'location_type', 'room_number', 'room_number_detail',
+            'status', 'priority', 'updates', 'admin_notes', 'img', 'created_at', 'is_mine', 'student_name', 'assigned_staff',
+            'assigned_staff_name', 'assigned_staff_job', 'assigned_external_name'
+        ]
+        read_only_fields = ["id", "created_at", "is_mine"]
+
+    def get_is_mine(self, obj):
+        request = self.context.get("request")
+        return obj.student_id == request.user.id if request else False
+
+    def get_student_name(self, obj):
+        if obj.student:
+            full_name = obj.student.get_full_name()
+            if full_name:
+                return full_name
+            return obj.student.username
+        return "Sistema"
+
+    def validate(self, data):
+        request = self.context.get("request")
+        user = request.user
+        residence = getattr(request, "residence", None)
+
+        if self.instance:
+            is_admin = has_screen_permission(user, residence, "incidences")
+            is_owner = self.instance.student_id == user.id
+
+            # Si no es admin y la incidencia ya tiene asignación o ya fue tocada por un administrador, no permitir edición
+            if not is_admin and is_owner:
+                has_staff_assignment = self.instance.assigned_staff is not None
+                has_external_assignment = self.instance.assigned_external_name and self.instance.assigned_external_name.strip()
+                has_admin_updates = self.instance.updates.exists()
+                has_non_pending_status = self.instance.status != 'pending'
+
+                if has_staff_assignment or has_external_assignment:
+                    raise serializers.ValidationError(
+                        {"detail": "No puedes editar una incidencia que ya ha sido asignada a personal."}
+                    )
+                if has_admin_updates or has_non_pending_status:
+                    raise serializers.ValidationError(
+                        {"detail": "No puedes editar una incidencia que ya ha sido gestionada por un administrador."}
+                    )
+                assigned_staff = data.get('assigned_staff')
+                if assigned_staff and assigned_staff.status != 'active':
+                    status_display = assigned_staff.get_status_display()
+                    raise serializers.ValidationError(
+                        {"assigned_staff": f"No se puede asignar personal en estado: {status_display}."}
+                )
+
+            if not is_admin:
+                if not is_owner:
+                    for f in [
+                        "title",
+                        "description",
+                        "location_type",
+                        "img",
+                        "room_number",
+                    ]:
+                        if f in data and data[f] != getattr(self.instance, f):
+                            raise serializers.ValidationError(
+                                {f: "Solo el creador puede modificar esto."}
+                            )
+
+                for f in ["status", "assigned_staff", "assigned_external_name"]:
+                    if f in data:
+                        val_actual = getattr(self.instance, f)
+                        if data[f] != val_actual:
+                            raise serializers.ValidationError(
+                                {
+                                    f: "Solo un administrador puede modificar el estado o asignación."
+                                }
+                            )
+
+                if "priority" in data and data["priority"] != self.instance.priority:
+                    if not is_owner:
+                        raise serializers.ValidationError(
+                            {
+                                "priority": "No tienes permiso para cambiar la prioridad de otros."
+                            }
+                        )
+                    if self.instance.status != "pending":
+                        raise serializers.ValidationError(
+                            {
+                                "priority": "No puedes cambiar la urgencia de una incidencia que ya está siendo procesada."
+                            }
+                        )
+
+        return data
+
+
+class AdminIncidenceSerializer(IncidenceSerializer):
+    student_name = serializers.SerializerMethodField()
+    #Solo staff activo
+    assigned_staff = serializers.PrimaryKeyRelatedField(
+        queryset=Staff.objects.filter(status='active'), 
+        required=False,
+        allow_null=True
+    )
+
+    class Meta(IncidenceSerializer.Meta):
+        fields = IncidenceSerializer.Meta.fields + ["student_name", "student"]
+        read_only_fields = IncidenceSerializer.Meta.read_only_fields + ["student"]
+
+    def get_student_name(self, obj):
+        return (
+            obj.student.get_full_name() or obj.student.username
+            if obj.student
+            else "Residente"
+        )

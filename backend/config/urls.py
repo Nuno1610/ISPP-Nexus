@@ -1,0 +1,65 @@
+from apps.common.views import (
+    AdminCreateResidentView,
+    AdminStudentProfileView,
+    AuthLoginView,
+    AuthLogoutView,
+    AuthMeView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
+    StudentProfileView,
+    TenantContextView,
+)
+from django.conf import settings
+from django.http import JsonResponse
+from django.urls import include, path
+
+
+def healthcheck(_request):
+    return JsonResponse({"status": "ok"})
+
+
+urlpatterns = [
+    path("health/", healthcheck, name="healthcheck"),
+    path(
+        "api/public/tenant-context/", TenantContextView.as_view(), name="tenant-context"
+    ),
+    path("api/auth/login/", AuthLoginView.as_view(), name="auth-login"),
+    path("api/auth/logout/", AuthLogoutView.as_view(), name="auth-logout"),
+    path("api/auth/me/", AuthMeView.as_view(), name="auth-me"),
+    path(
+        "api/auth/password-reset/request/",
+        PasswordResetRequestView.as_view(),
+        name="password-reset-request",
+    ),
+    path("api/auth/password-reset/confirm/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
+    path("api/admin/residents/create/", AdminCreateResidentView.as_view(), name="admin-create-resident"),
+    path("api/admin/students/<int:user_id>/profile/", AdminStudentProfileView.as_view(), name="admin-student-profile"),
+    path("api/student/profile/", StudentProfileView.as_view(), name="student-profile"),
+    path("api/", include("apps.residents.urls")),
+    path("api/", include("apps.events.urls")),
+    path("api/", include("apps.staff.urls")),
+    path("api/", include("apps.onboarding.urls")),
+    path(
+        "api/auth/password-reset/confirm/",
+        PasswordResetConfirmView.as_view(),
+        name="password-reset-confirm",
+    ),
+    path("api/", include("apps.objects.urls")),
+    path("api/", include("apps.bedrooms.urls")),
+    path("api/incidences/", include("apps.incidences.urls")),
+    path("api/membership/", include("apps.membership.urls")),
+    path('api/', include('apps.announcements.urls')),
+    path("api/", include("apps.chats.urls")),
+    path("api/", include("apps.packages.urls")),
+    path("api/", include("apps.spaces.urls")),
+    path("api/", include("apps.guests.urls")),
+    path("api/", include("apps.residences.urls")),
+    path("api/", include("apps.menu.urls")),
+]
+
+if settings.MATCHING_ENABLED:
+    urlpatterns.append(path("api/", include("apps.matching.urls")))
+
+from django.conf.urls.static import static
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

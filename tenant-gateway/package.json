@@ -1,0 +1,14 @@
+{
+  "name": "tenant-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1",
+    "redis": "^4.7.0",
+    "ws": "^8.18.0"
+  }
+}
